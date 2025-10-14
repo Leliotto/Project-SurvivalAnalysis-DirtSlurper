@@ -1,0 +1,142 @@
+---
+title: "Project - Survival"
+output: html_notebook
+---
+
+
+
+```{r}
+library(survival)
+library(km.ci)
+library(glue)
+# data
+data <- read.csv('data/DirtSlurper3100.csv', 
+                 skip = 12,                  # We skip fist 12 rows
+                 stringsAsFactors = FALSE,   # does not convert strings to factor
+                 na.strings = "---")         # code for finding NA
+
+```
+
+Converting dates
+
+```{r}
+data$Registration.date <- as.Date(data$Registration.date, format = "%d%b%Y")
+data$Failure.date <- as.Date(data$Failure.date, format = "%d%b%Y")
+
+```
+
+Replacing missing values 
+
+```{r}
+data[is.na(data)] <- ""
+```
+
+Creating censored columns for battery, impact sensor, IR sensor and machine
+
+
+```{r}
+# Censored machine
+data$censored.machine <- 0
+data$censored.machine[data$Sent.for.repair == "YES"] <- 1
+
+# Censored battery 
+data$censored.battery <- 0
+data$censored.battery[(data$Sent.for.repair == "YES") & (data$Battery.status == "Damage")] <- 1
+
+# Censored impact sensor 
+data$censored.impact <- 0
+data$censored.impact[(data$Sent.for.repair == "YES") & (data$Impact.status == "Damage")] <- 1
+
+# Censored IR sensor 
+data$censored.IR <- 0
+data$censored.IR[(data$Sent.for.repair == "YES") & (data$IR.status == "Damage")] <- 1
+
+```
+
+Hypothesis testing for entire machine: Pets
+
+```{r}
+fit.machineAnimals <- survfit(Surv(Total.usage.time, censored.machine) ~ Pets, data = data)
+
+# Plot survival curves
+plot(fit.machineAnimals, col = c("black", "green"), lty = 1,
+     xlab = "Time", ylab = "Survival Probability", conf.int = FALSE, main = "Kaplan–Meier survival curve by pet ownership")
+legend("topright", legend = levels(as.factor(data$Pets)), 
+       col = c("black", "green"), lty = 1, bty = "n")
+
+```
+Actually maybe not, this looks bad. There are more observations with pets compared to no pets!
+
+```{r}
+# Statistical test
+survdiff(Surv(Total.usage.time, censored.machine) ~ Pets, data = data)
+
+```
+There is not enough evidence to reject null hypothesis.
+
+
+Hypothesis testing for battery: Pets
+
+```{r}
+fit.BatteryAnimals <- survfit(Surv(Total.usage.time, censored.battery) ~ Pets, data = data)
+
+# Plot survival curves
+plot(fit.BatteryAnimals, col = c("black", "green"), lty = 1,
+     xlab = "Time", ylab = "Survival Probability", conf.int = FALSE, main = "Kaplan–Meier survival curve by pet ownership")
+legend("topright", legend = levels(as.factor(data$Pets)), 
+       col = c("black", "green"), lty = 1, bty = "n")
+
+```
+The plot looks good. At first glance it shows that there might be a significant
+difference for battery lifetime, depending on presence of animals
+
+```{r}
+
+survdiff(Surv(Total.usage.time, censored.battery) ~ Pets, data = data)
+
+```
+There is enough evidence to reject null hypothesis. We can argue that the 
+battery lifetime is affected by presence of pats in given household.
+
+Hypothesis testing for impact sensor: Pets
+
+```{r}
+fit.impactAnimals <- survfit(Surv(Total.usage.time, censored.impact) ~ Pets, data = data)
+
+# Plot survival curves
+plot(fit.impactAnimals, col = c("black", "green"), lty = 1,
+     xlab = "Time", ylab = "Survival Probability", conf.int = FALSE, main = "Kaplan–Meier survival curve by pet ownership")
+legend("topright", legend = levels(as.factor(data$Pets)), 
+       col = c("black", "green"), lty = 1, bty = "n")
+
+```
+There are less observations where there are no pets in a household. This is the 
+reason why the graphs have so varying lengths.
+
+```{r}
+survdiff(Surv(Total.usage.time, censored.impact) ~ Pets, data = data)
+```
+There is enough evidence to reject null hypothesis. We can argue that the 
+impact sensor is affected by presence of pats in given household. However I would
+not fully rely on this estimate as it seems that the results are counter intuitive.
+
+
+Hypothesis testing for IR sensor: Pets
+
+```{r}
+fit.IRAnimals <- survfit(Surv(Total.usage.time, censored.IR) ~ Pets, data = data)
+
+# Plot survival curves
+plot(fit.IRAnimals, col = c("black", "green"), lty = 1,
+     xlab = "Time", ylab = "Survival Probability", conf.int = FALSE, main = "Kaplan–Meier survival curve by pet ownership")
+legend("bottomright", legend = levels(as.factor(data$Pets)), 
+       col = c("black", "green"), lty = 1, bty = "n")
+
+```
+Pets having a better effect, seem just as a correlation rather than causation.
+```{r}
+survdiff(Surv(Total.usage.time, censored.IR) ~ Pets, data = data)
+
+```
+There is statistical difference. No pets worsen the performance of IR sensor.
+But I would focus mainly of battery lifetime.

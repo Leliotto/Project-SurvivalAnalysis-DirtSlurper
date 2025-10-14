@@ -1,0 +1,187 @@
+---
+title: "SA_Project"
+author: "Davide"
+date: "2025-10-01"
+output:
+  pdf_document:
+    fig_width: 4
+    fig_height: 2.5
+  html_document:
+    df_print: paged
+  word_document: default
+  html_notebook: default
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+# Opzioni globali per knitr
+knitr::opts_chunk$set(echo = FALSE, results = 'show')
+# knitr::opts_chunk$set(fig.width=3.5, fig.height=2)
+knitr::opts_chunk$set(fig.align = 'center')
+
+```
+
+
+## Exploratory Data Analysis
+```{r}
+library(ggplot2)
+library(survival)
+library(knitr)
+library(dplyr)
+library(survival)
+library(ggplot2)
+library(tibble)
+library(lubridate)
+```
+
+
+
+```{r}
+
+# Skip the first 12 lines of metadata
+data <- read.csv("DirtSlurper3100.csv",
+               skip = 12,
+               stringsAsFactors = FALSE,
+               na.strings = "---")
+
+# Inspect
+head(data)
+
+
+
+```
+
+Convert Dates
+```{r}
+data$Registration.date <- dmy(data$Registration.date)
+data$Failure.date <- dmy(data$Failure.date)
+
+head(data)
+```
+
+
+
+1. Registration Date Analysis
+
+```{r}
+
+
+ggplot(data, aes(x = Registration.date)) +
+  geom_histogram(binwidth = 30,  
+                 fill = "black", color="hotpink") +
+  labs(title = "Registrations Over Time",
+       x = "Registration Date", y = "Count")
+
+
+```
+2. Total Usage Time Analysis
+
+```{r}
+
+ggplot(data, aes(x = Total.usage.time)) +
+  geom_histogram(binwidth = 30,  
+                 fill = "pink", color="purple") +
+  labs(title = "Distribution of usage",
+       x = "Total Usage Time", y = "Count")
+
+```
+
+```{r}
+
+ggplot(data, aes(x = Registration.date, y = Total.usage.time)) +
+  geom_point(  alpha=0.2, color="hotpink") +
+  labs(title = "Registrations Over Time",
+       x = "Registration Date", y = "Usage Time(hours)")
+
+
+```
+
+We can see that the usage time highly depends on  when the registration is which makes sense but also is just proof that the data is right-censored. It s not a causal relationship, just stands to show how the data is cut at a certain point.
+
+3. Pets
+
+```{r}
+ggplot(data, aes(x = Pets, y = Total.usage.time)) +
+  geom_boxplot(fill = "orange") +
+  labs(title = "Usage Time by Pets", y = "Usage Time (hours)")
+
+```
+Surprising that the overall useage time seems to be higher for households with pets
+
+4. Sent for repair
+```{r}
+ggplot(data, aes(x = Sent.for.repair, y = Total.usage.time)) +
+  geom_boxplot(fill = "red") +
+  labs(title = "Usage Time by repair", y = "Usage Time (hours)")
+
+```
+So I could say that the repairs look successful since the repaired ones were used lonegr on average
+
+5. Carpet score
+```{r}
+data$Carpet.score <- as.factor(data$Carpet.score)
+
+ggplot(data, aes(x = Carpet.score, y = Total.usage.time)) +
+  geom_boxplot(fill = "darkgreen") +
+  labs(title = "Usage Time by carpet", y = "Usage Time (hours)")
+
+```
+
+Interesting that most have the same statistics besides score 8. Maybe there are fewer scores 8?
+
+```{r}
+table(data$Carpet.score)
+carpet_counts <- as.data.frame(table(data$Carpet.score))
+colnames(carpet_counts) <- c("Carpet.score", "Count")
+carpet_counts
+
+
+```
+
+So indeed there are very little instances of carpet with score 8 as well as 7. Scores 6 and 1 are also not particularly common.
+
+
+6. Other
+```{r}
+data$time.to.failure <- as.numeric(data$Failure.date - data$Registration.date)
+
+ggplot(data, aes(x = time.to.failure)) +
+  geom_histogram(binwidth = 100, fill = "red", color = "black") +
+  labs(title = "Time to Failure Distribution", x = "Days until Failure")
+
+
+```
+The days until failure(I do not think my plot accounts for NA values so I guess the NA values are counted as 0?) seem to be following a more or less normal distribution.
+
+
+
+Kaplan Meier curve
+```{r}
+# Event: 1 if failure date present, 0 if missing (censored)
+data$EventCensor = ifelse(is.na(data$Failure.date), 0L, 1L)
+
+# Ensure time is numeric
+data$Total.usage.time = as.numeric(data$Total.usage.time)
+
+# Drop rows with missing time or event
+df_km = subset(data, !is.na(Total.usage.time) & !is.na(EventCensor))
+
+# KM Curve
+library(survival)
+KM1 = survfit(Surv(time = Total.usage.time, event = EventCensor) ~ 1, data = df_km)
+plot(KM1, xlab = "Usage time", ylab = "Survival probability", main = "Kaplan–Meier curve")
+
+
+```
+
+Weibull only numerical, not estimating parameters
+(Maybe in the end we can use the shape parameter of the Weibull)
+
+Comparison with distributions and KM
+KM also density function
+
+Greenwood formula to inference (maybe later to include)
+
+
+
