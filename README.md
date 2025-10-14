@@ -3,6 +3,7 @@
 This repo contains our survival/reliability analysis for the DirtSlurper3100 robot vacuum. It includes EDA, Kaplan–Meier curves and model-based inference. The assignment emphasizes clear assumptions, model descriptions, and well-justified tests and estimates.
 
 ## Repository layout
+
 repo-root/
 ├── data/
 │   └── DirtSlurper3100.csv
