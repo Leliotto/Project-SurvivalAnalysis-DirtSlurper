@@ -5,18 +5,19 @@ This repo contains our survival/reliability analysis for the DirtSlurper3100 rob
 ## Repository layout
 
 repo-root/
-├── data/
-│   └── DirtSlurper3100.csv
-├── docs/
-│   └── DirtSlurper_2025.pdf
-├── analysis/
-│   ├── Survival_Analysis_Project.Rmd
-│   └── KM_curve.Rmd
-├── report/
-│   └── Report.pdf
-└── outputs/
-    ├── figures/
-    └── tables/
+├─ data/
+│  └─ DirtSlurper3100.csv
+├─ docs/
+│  └─ DirtSlurper_2025.pdf
+├─ analysis/
+│  ├─ Survival_Analysis_Project.Rmd
+│  └─ KM_curve.Rmd
+├─ report/
+│  └─ Report.pdf
+└─ outputs/
+   ├─ figures/
+   └─ tables/
+
 
 ## What’s inside
 
