@@ -13,6 +13,8 @@ repo-root/
 ├─ analysis/
 │  ├─ Survival_Analysis_Project.Rmd
 │  └─ KM_curve.Rmd
+│  └─ Inference_on_Battery.Rmd
+│  └─ DirtSlurper3100.csv
 ├─ report/
 │  └─ Report.pdf
 └─ outputs/
@@ -28,4 +30,5 @@ repo-root/
 - **data/raw/DirtSlurper3100.csv**: warranty dataset with registrations (2015–2019) and repair/censoring info (right-censored at 2019-12-31).
 - **analysis/Survival_Analysis_Project.Rmd**: EDA + first Kaplan–Meier on the dataset.
 - **analysis/KM_curve.Rmd**: KM curve on component-level.
+- **Inference_on_Battery.Rmd**: Inference on battery capacity and usage.
 - **report/Report.pdf**: report divided in: Intro, Methodology, Results and Conclusions.
