@@ -1,0 +1,101 @@
+---
+title: "Inference Battery"
+author: "Davide"
+date: "2025-10-15"
+output:
+  pdf_document:
+    fig_width: 4
+    fig_height: 2.5
+  html_document:
+    df_print: paged
+  word_document: default
+  html_notebook: default
+editor_options: 
+  chunk_output_type: inline
+---
+
+
+```{r}
+# Load necessary libraries
+library(survival)
+library(dplyr)
+library(lubridate)
+
+# Read data, skipping header lines and marking '---' as NA
+data <- read.csv("DirtSlurper3100.csv", skip = 12, na.strings = "---", stringsAsFactors = FALSE)
+
+# Convert dates from character to Date class
+data$Registration.date <- dmy(data$Registration.date)
+data$Failure.date <- dmy(data$Failure.date)
+
+# Exclude extreme use cases (>=2400 hours of use)
+data_filtered <- filter(data, Total.usage.time < 2400)
+
+dim(data_filtered)
+
+```
+
+
+
+```{r}
+# Define event indicator for battery failure
+data_filtered$Event <- ifelse(data_filtered$Battery.status == "Damage", 1, 0)
+
+# Define lifetime in days:
+# Use Failure.date if present; otherwise use a common censoring date (2020-01-01)
+cutoff_date <- as.Date("2020-01-01")
+data_filtered$End.date <- ifelse(is.na(data_filtered$Failure.date), cutoff_date, data_filtered$Failure.date)
+data_filtered$End.date <- as.Date(data_filtered$End.date, origin = "1970-01-01")
+data_filtered$time_days <- as.numeric(data_filtered$End.date - data_filtered$Registration.date)
+
+# Keep only necessary columns for survival analysis
+surv_data <- data_filtered %>% select(time_days, Event)
+summary(surv_data$time_days)
+table(surv_data$Event)
+
+```
+
+
+
+```{r}
+# Kaplan-Meier survival estimation
+KM_fit <- survfit(Surv(time_days, Event) ~ 1, data = surv_data)
+KM_fit
+summary(KM_fit, times = c(365, 730, 1000))
+
+```
+
+
+
+```{r}
+# Fit a Weibull accelerated failure-time model
+weibull_fit <- survreg(Surv(time_days, Event) ~ 1, data = surv_data, dist = "weibull")
+summary(weibull_fit)
+
+# Extract Weibull parameters (shape and scale) from survreg output
+weibull_shape <- 1/weibull_fit$scale # shape parameter k
+weibull_scale <- exp(coef(weibull_fit))[[1]] # scale parameter λ
+weibull_shape; weibull_scale
+
+# Compute L10 from Weibull model
+L10_param <- weibull_scale * (-log(0.9))^(1/weibull_shape)
+L10_param
+```
+
+
+
+```{r}
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
