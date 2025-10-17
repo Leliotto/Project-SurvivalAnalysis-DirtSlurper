@@ -35,7 +35,6 @@ data$Failure.date <- dmy(data$Failure.date)
 # Exclude extreme use cases (>=2400 hours of use)
 data_filtered <- filter(data, Total.usage.time < 2400)
 
-# Dimensions after filtering
 dim(data_filtered)
 
 ```
@@ -93,7 +92,6 @@ plot(KM_fit, conf.int = TRUE, mark.time = FALSE,
 
 
 
-
 ```{r}
 # Fit a Weibull accelerated failure-time model for battery lifetime
 weibull_fit <- survreg(Surv(time_days, Event) ~ 1, data = surv_data, dist = "weibull")
@@ -122,15 +120,14 @@ idx <- which(t > 0 & S > 0 & S < 1)
 x <- log(t[idx]) 
 y <- log(-log(S[idx])) 
 
-# y = a + bx, where b = beta and a = -beta*log(alpha)) 
-lin_fit <- lm(y ~ x)
-
 plot(x, y, pch = 16, cex=0.5, 
      xlab ="log(time)", ylab = "log(-log(S(t)))",
      main = "Weibull sanity check with log-log plot")
-abline(lin_fit, col="blue", lwd=2)
+abline(a = - weibull_shape * log(weibull_scale), b = weibull_shape, col="blue", lwd=2)
 
 ```
+
+
 ```{r weibull sanity check 2}
 # Weibull sanity check: log{-log S(t)} vs log(t)
 KM_fit <- survfit(Surv(time_days, Event) ~ 1, data = surv_data)
@@ -219,7 +216,7 @@ for(b in 1:B) {
 L10_ci <- quantile(L10_boot, probs = c(0.025, 0.975))
 L10_ci
 
-# Two-sided 95% CI (descriptive)
+# Two-sided 95% CI
 L10_ci_95 <- quantile(L10_boot, c(0.025, 0.975))
 L10_ci_95
 

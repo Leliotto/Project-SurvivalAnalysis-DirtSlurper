@@ -18,202 +18,98 @@ editor_options:
 knitr::opts_chunk$set(echo = TRUE, message = FALSE)
 ```
 
-## Introduction
-
-This analysis examines the lifetime of the **Impact sensor** in the DirtSlurper3100 robot using survival analysis techniques. We use field data on robot usage and failures to estimate the sensor's survival function and hazard. We handle *censored* observations (sensors that have not failed by the end of observation or were removed due to other component failures) and apply non-parametric estimators (Kaplan-Meier and Nelson-Aalen) as well as parametric modeling (Weibull). Our goal is to characterize the Impact sensor's reliability (e.g., estimate the time by which 10% of sensors fail, known as L10 life) under typical usage conditions.
-
-## Data Preparation
-
-First, we load the dataset and preprocess it. The raw CSV has a preamble, which we skip. We treat `"---"` as missing values. We then focus on the Impact sensor, defining an event indicator that marks a failure of the Impact sensor.
 
 ```{r}
 library(survival)
 library(dplyr)
 library(lubridate)
 
-# Read data, skipping descriptive header lines and treating '---' as NA
 data <- read.csv("DirtSlurper3100.csv", skip = 12, na.strings = "---", stringsAsFactors = FALSE)
 
-# Convert date columns from character to Date (if needed)
 data$Registration.date <- dmy(data$Registration.date)
-data$Failure.date      <- dmy(data$Failure.date)
+data$Failure.date <- dmy(data$Failure.date)
 
 dim(data)
 head(data, 3)
 ```
-
-For this analysis, we consider **typical usage** scenarios and exclude extremely high-use cases (robots with >=2400 hours of use), as these may represent outliers or special-use cases. This focuses our analysis on the range of usage most customers would experience.
 
 ```{r filter-data}
 
 # Indicator for Impact sensor failure (1 if failed, 0 if censored)
 data_filtered <- data %>%
   mutate(
-    TimeHours = as.numeric(Total.usage.time),
     Event = ifelse(!is.na(Impact.status) & grepl("^\\s*damage\\s*$", Impact.status, ignore.case = TRUE), 1, 0)
   ) %>%
-  filter(!is.na(TimeHours))  # keep times we can use
+  filter(!is.na(Total.usage.time))
 
-# quick checks (optional)
 dim(data_filtered)
-table(data_filtered$Event)    # 0 = censored, 1 = event
-summary(data_filtered$TimeHours)
+table(data_filtered$Event) # 0 = censored, 1 = event
+summary(data_filtered$Total.usage.time)
 
-
+str(data_filtered$Total.usage.time)
 ```
 
-We have created a "TimeHours" variable for the time-to-event (in usage hours) and an "Event" indicator for Impact sensor failure. An "Event" is 1 if the Impact sensor was reported as damaged (failed) and 0 if the sensor never failed (up to the end of observation or removal for other reasons). 
+ 
 
-```{r}
-# KM with Greenwood CIs
-KM_fit <- survfit(Surv(TimeHours, Event) ~ 1, data = data_filtered)
+```{r KM plot}
+KM_fit <- survfit(Surv(Total.usage.time, Event) ~ 1, data = data_filtered)
 plot(KM_fit, conf.int = TRUE,
      xlab = "Usage time (hours)", ylab = "Survival probability",
-     main = "Impact sensor survival (KM)")
+     main = "Kaplan-Meier Impact sensor survival")
 
-# Useful survival checkpoints
-summary(KM_fit, times = c(500, 1000, 1500, 2000, 2500, 3000))
+KM_fit
+
+summary(KM_fit, times = c(1000, 2000, 2500, 3000, 3500, 3819))
+
+
+
 ```
 
-```{r}
-# Nelson–Aalen cumulative hazard (from KM pieces)
+```{r NA plot}
+# Nelson–Aalen cumulative hazard
 na_df <- with(KM_fit, data.frame(
   time     = time,
   n_risk   = n.risk,
   n_event  = n.event
 ))
-na_df <- subset(na_df, n_event > 0 & n_risk > 0)
 na_df$cumhaz <- cumsum(na_df$n_event / na_df$n_risk)
 
 plot(na_df$time, na_df$cumhaz, type = "s",
      xlab = "Usage time (hours)", ylab = "Cumulative hazard",
-     main = "Nelson–Aalen cumulative hazard (Impact)")
+     main = "Nelson–Aalen cumulative hazard - Impact Sensor")
 
 ```
 
-
-
-## Exploratory Data Analysis
-
-Let's summarize the data. We want to know how many robots had the Impact sensor fail vs how many did not, and explore potential factors like pet ownership or carpet score.
-
-```{r}
-summary(data_filtered$Total.usage.time)
-cat("Total after filtering:", nrow(data_filtered), "\n")
-cat("Impact sensor failures:", sum(data_filtered$Event == 1), "\n")
-cat("Censored:", sum(data_filtered$Event == 0), "\n")
-
-# Failures by Pets and by Carpet score groups
-tbl_pets <- with(data_filtered, table(Pets, Event))
-tbl_carpet <- with(data_filtered, table(CarpetGroup = ifelse(`Carpet.score` >= 4, "High carpet", "Low carpet"), Event))
-tbl_pets
-tbl_carpet
-```
-
-We see the distribution of usage times and how many failures occurred. We also tabulate events by **Pets** (whether the household has pets) and by **Carpet score** (a rating of how much carpeting the environment has, here grouped into "Low carpet" vs "High carpet"). This gives an initial sense of whether those factors might influence the sensor's life.
-
-Next, we can compute the proportion of failures in each category for context:
-
-```{r eda-proportions}
-# Proportion of Impact sensor failures by Pets
-prop_fail_pets <- prop.table(tbl_pets, margin = 1)
-prop_fail_pets
-
-# Proportion of Impact sensor failures by Carpet group
-prop_fail_carpet <- prop.table(tbl_carpet, margin = 1)
-prop_fail_carpet
-```
-
-From the exploratory analysis, it appears that **pet ownership** and **carpet score** may be associated with differences in Impact sensor failure rates. We will examine these formally later.
 
 ## Non-parametric Survival Estimates
 
-We now estimate the survival function for the Impact sensor using the Kaplan–Meier estimator, and the cumulative hazard using the Nelson–Aalen estimator. These non-parametric methods make minimal assumptions and handle censoring properly.
+```{r NA estimate}
+# Nelson-Aalen cumulative hazard estimate 
+km_times <- KM_fit$time # times of events
+n_event <- KM_fit$n.event # number of events at each event time
+n_risk <- KM_fit$n.risk # number at risk just before each event time
 
-```{r km-na-estimate}
-# Kaplan-Meier survival estimate for Impact sensor (overall)
-KM_fit <- survfit(Surv(TimeHours, Event) ~ 1, data = data_filtered)
-print(KM_fit)
-
-# Extract survival probabilities at certain time points (e.g., 1000, 1500, 2000, 2400 hours)
-print(summary(KM_fit, times = c(1000, 1500, 2000, 2400)))
-
-# Nelson-Aalen cumulative hazard estimate (we can compute from the survfit object)
-# survfit in base R does not directly give NA estimator, but we can calculate it:
-km_times <- KM_fit$time       # times of events
-n_risk   <- KM_fit$n.risk     # number at risk just before each event time
-n_event  <- KM_fit$n.event    # number of events at each event time
-
-# Cumulative hazard H(t) at each event time as sum of (d_i / n_i)
+# Cumulative hazard H(t)
 cum_hazard <- cumsum(n_event / n_risk)
 # Combine times and cumulative hazard for output
 na_estimate <- data.frame(Time = km_times, CumHazard = cum_hazard)
-head(na_estimate, 10)
 tail(na_estimate, 5)
 ```
 
-The Kaplan-Meier estimator provides the estimated survival probability $S(t)$ for the Impact sensor over time, while the Nelson-Aalen gives the cumulative hazard $H(t)$. We printed survival probabilities at specific milestones (e.g., 1000, 1500, 2000, 2400 hours) for interpretation.
-
-Let's plot the Kaplan–Meier survival curve with confidence intervals, and the Nelson–Aalen cumulative hazard curve.
-
-```{r plot-km, fig.height=4, fig.width=6}
-# Kaplan-Meier survival plot with 95% confidence band
-plot(KM_fit, conf.int = TRUE, xlab = "Usage time (hours)", ylab = "Survival probability",
-     main = "Kaplan-Meier Survival Curve for Impact Sensor")
-```
-
-```{r plot-na, fig.height=4, fig.width=6}
-# Plot Nelson-Aalen cumulative hazard
-plot(na_estimate$Time, na_estimate$CumHazard, type = "s", 
-     xlab = "Usage time (hours)", ylab = "Cumulative hazard",
-     main = "Nelson-Aalen Cumulative Hazard for Impact Sensor")
-```
-
-From the plots, we observe that the **survival curve** stays close to 1 (100%) for a long duration, reflecting very few failures, and only starts to decline slightly toward the upper end of the observed period. The **cumulative hazard** stays near 0 for most of the range, indicating a very low hazard rate, and begins to rise slowly at higher usage hours.
-
-## Group Comparisons (Covariates)
-
-We test whether survival differs by some key covariates: presence of pets and carpet score. We use the log-rank test (Mantel–Cox test) to compare survival curves between groups.
-
-```{r logrank-tests}
-# Kaplan-Meier by Pets
-KM_pets <- survfit(Surv(TimeHours, Event) ~ Pets, data = data_filtered)
-plot(KM_pets, col=c("blue","red"), xlab="Hours", ylab="Survival", main="Survival by Pet Ownership", lty=1)
-legend("bottomleft", legend = levels(factor(data_filtered$Pets)), col=c("blue","red"), lty=1)
-# Log-rank test by Pets
-lr_pets <- survdiff(Surv(TimeHours, Event) ~ Pets, data = data_filtered)
-lr_pets
-
-# Kaplan-Meier by Carpet group (Low vs High)
-data_filtered$CarpetGroup <- ifelse(data_filtered$Carpet.score >= 4, "High carpet", "Low carpet")
-KM_carpet <- survfit(Surv(TimeHours, Event) ~ CarpetGroup, data = data_filtered)
-plot(KM_carpet, col=c("green","orange"), xlab="Hours", ylab="Survival", main="Survival by Carpet Level", lty=1)
-legend("bottomleft", legend = levels(factor(data_filtered$CarpetGroup)), col=c("green","orange"), lty=1)
-# Log-rank test by Carpet group
-lr_carpet <- survdiff(Surv(TimeHours, Event) ~ CarpetGroup, data = data_filtered)
-lr_carpet
-```
-
-The plotted survival curves by Pets and by Carpet level, along with the log-rank test results, allow us to assess if differences are statistically significant. We output the `survdiff` results for the chi-square statistic and p-value.
 
 ## Parametric Survival Modeling
 
-Given the low failure rate, we use a parametric model to extrapolate and estimate long-term metrics like the **L10 life** (the time by which 10% of sensors have failed). We assume a Weibull distribution for the Impact sensor lifetime, as it is a flexible model for increasing or decreasing hazard.
-
 ```{r weibull-fit}
-# survreg(weibull) requires strictly positive times and at least one event
-df_weibull <- subset(data_filtered, !is.na(TimeHours) & TimeHours > 0)
-weibull_fit <- survreg(Surv(TimeHours, Event) ~ 1, data = df_weibull, dist = "weibull")
+# survreg(weibull) requires strictly positive times
+df_weibull <- subset(data_filtered, Total.usage.time > 0)
+weibull_fit <- survreg(Surv(Total.usage.time, Event) ~ 1, data = df_weibull, dist = "weibull")
 summary(weibull_fit)
 ```
-
-The survreg output provides the coefficients for an intercept (which corresponds to $\log(\alpha)$, where $\alpha$ is the Weibull scale parameter) and a scale value (which is the standard deviation of errors on the log-scale; the Weibull shape parameter $\beta = 1/\text{scale}$ in this parameterization).
-
-We extract the Weibull parameters from the model:
 
 ```{r weibull-params}
 weibull_shape <- 1 / weibull_fit$scale  # beta (shape)
 weibull_scale <- exp(coef(weibull_fit)) # alpha (scale)
+
 cat("Weibull beta:", weibull_shape, "\n")
 cat("Weibull alpha:", weibull_scale, "hours \n")
 
@@ -222,18 +118,18 @@ L10 <- weibull_scale * (-log(0.9))^(1 / weibull_shape)
 cat("Estimated L10 life:", L10, "hours \n")
 ```
 
-We also perform a diagnostic check for the Weibull assumption. For a correct Weibull model, a plot of $\ln(-\ln \hat{S}(t))$ against $\ln(t)$ should form an approximate straight line (this is a *complementary log-log* plot). We compare the empirical K–M-based points to the fitted model's line.
-
 ```{r}
-KM_fit_diag <- survfit(Surv(TimeHours, Event) ~ 1, data = df_weibull)
-keep <- which(KM_fit_diag$surv > 0 & KM_fit_diag$surv < 1)
-x <- log(KM_fit_diag$time[keep])
-y <- log(-log(KM_fit_diag$surv[keep]))
+KM_fit_diag <- survfit(Surv(Total.usage.time, Event) ~ 1, data = df_weibull)
+idx <- which(KM_fit_diag$surv > 0 & KM_fit_diag$surv < 1)
+x <- log(KM_fit_diag$time[idx])
+y <- log(-log(KM_fit_diag$surv[idx]))
 
 plot(x, y, pch = 20,
      xlab = "log(time)", ylab = "log(-log(Survival))",
-     main = "Weibull check (complementary log–log)")
-abline(a = -weibull_shape * log(weibull_scale), b = weibull_shape, lty = 2, lwd = 2, col="blue")
+     main = "Weibull sanity check with log-log plot - Impact Sensor")
+abline(a = - weibull_shape * log(weibull_scale), b = weibull_shape, lty = 2, lwd = 2, col="blue")
 ```
-In the above plot, the red line is a linear fit to the Kaplan-Meier estimates (on complementary log-log scale) and the blue dashed line is the expectation from our Weibull model. This visualizes how well the Weibull assumption holds.
+
+
+
 
