@@ -15,6 +15,9 @@ repo-root/
 │  └─ KM_curve.Rmd
 │  └─ Inference_on_Battery.Rmd
 │  └─ DirtSlurper3100.csv
+│  └─ Battery_UsageGroups.pdf
+│  └─ KM_vs_Weibull.pdf
+│  └─ KMcurve.pdf
 ├─ report/
 │  └─ Report.pdf
 └─ outputs/
