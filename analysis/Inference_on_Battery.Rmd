@@ -1,7 +1,7 @@
 ---
 title: "Inference Battery"
 author: "Davide"
-date: "2025-10-15"
+date: "2025-10-17"
 output:
   pdf_document:
     fig_width: 4
@@ -69,8 +69,8 @@ data_filtered <- data_filtered %>%
     )
   )
 
-summary(surv_data$time_days)    # summary of observed times (in days)
-table(surv_data$Event)          # count of censored (0) and Events (1)
+summary(surv_data$time_days)    # Observed times (in days)
+table(surv_data$Event)          # Censored (0) vs Events (1)
 
 ```
 
@@ -80,7 +80,7 @@ table(surv_data$Event)          # count of censored (0) and Events (1)
 KM_fit <- survfit(Surv(time_days, Event) ~ 1, data = surv_data)
 KM_fit
 
-# Report survival probability estimates at specific time points (1 yr, 2 yr, 1000 days, 3 years)
+# Survival probability estimates at specific time points (1 yr, 2 yr, 1000 days, 3 years)
 summary(KM_fit, times = c(365, 730, 1000, 1095))
 ```
 
@@ -89,7 +89,6 @@ summary(KM_fit, times = c(365, 730, 1000, 1095))
 plot(KM_fit, conf.int = TRUE, mark.time = FALSE,
      xlab = "Time since Registration (days)", ylab = "Survival Probability",
      main = "Kaplan–Meier Estimate of Battery Survival")
-# (The shaded area or dashed lines represent the 95% confidence band for S(t))
 ```
 
 
@@ -113,45 +112,43 @@ L10_param
 
 ## Sanity check
 
-```{r weibull_sanity_check, fig.height=4, fig.width=6}
-# Complementary log–log (Weibull adequacy) check
-# Under Weibull: log(-log S(t)) = beta * log(t) - beta * log(alpha)
+```{r weibull_sanity_check}
 
-KM_fit <- survfit(Surv(time_days, Event) ~ 1, data = surv_data)
-tt <- KM_fit$time
-St <- KM_fit$surv
+# Weibull sanity check: log{-log S(t)} vs log(t) 
+KM_fit <- survfit(Surv(time_days, Event) ~ 1, data = surv_data) 
+t <- KM_fit$time 
+S <- KM_fit$surv 
+idx <- which(t > 0 & S > 0 & S < 1) 
+x <- log(t[idx]) 
+y <- log(-log(S[idx])) 
 
-# Keep usable points: 0 < S(t) < 1 and t > 0
-ok <- which(tt > 0 & St > 0 & St < 1)
-x  <- log(tt[ok])
-y  <- log(-log(St[ok]))
-
-# Optional: trim very early/late tails for stability (few events / heavy censoring)
-keep <- which(St[ok] > 0.05 & St[ok] < 0.95)
-x <- x[keep]; y <- y[keep]
-
-# Linear fit: y ≈ a + b x  (b ≈ beta, a ≈ -beta*log(alpha))
+# y = a + bx, where b = beta and a = -beta*log(alpha)) 
 lin_fit <- lm(y ~ x)
-beta_cll  <- unname(coef(lin_fit)[2])
-alpha_cll <- exp(-coef(lin_fit)[1] / beta_cll)
 
-# Plot points + KM-based line
-plot(x, y, pch = 16, cex = 0.6,
+plot(x, y, pch = 16, cex=0.5, 
+     xlab ="log(time)", ylab = "log(-log(S(t)))",
+     main = "Weibull sanity check with log-log plot")
+abline(lin_fit, col="blue", lwd=2)
+
+```
+```{r weibull sanity check 2}
+# Weibull sanity check: log{-log S(t)} vs log(t)
+KM_fit <- survfit(Surv(time_days, Event) ~ 1, data = surv_data)
+
+t <- KM_fit$time
+S <- KM_fit$surv
+
+idx <- which(t > 0 & S > 0.1 & S < 0.9)
+x <- log(t[idx])
+y <- log(-log(S[idx]))
+
+# y = a + b x, where b = beta and a = -beta*log(alpha)
+lin_fit <- lm(y ~ x)
+
+plot(x, y, pch = 16, cex = 0.5,
      xlab = "log(time)", ylab = "log(-log(S(t)))",
-     main = "Weibull adequacy: complementary log–log plot")
-abline(lin_fit, col = "red", lwd = 2)
-
-# Overlay AFT line from your Weibull fit (blue, dashed)
-# uses your previously computed: weibull_shape = beta, weibull_scale = alpha
-abline(a = -weibull_shape * log(weibull_scale), b = weibull_shape, col = "blue", lwd = 2, lty = 2)
-
-legend("topleft", bty = "n",
-       legend = c(sprintf("KM cll fit:  beta = %.2f,  alpha = %.0f", beta_cll, alpha_cll),
-                  sprintf("AFT line:    beta = %.2f,  alpha = %.0f", weibull_shape, weibull_scale)),
-       col = c("red","blue"), lty = c(1,2), lwd = 2)
-# (Optional) print comparison
-c(beta_cll = beta_cll, beta_aft = weibull_shape,
-  alpha_cll = alpha_cll, alpha_aft = weibull_scale)
+     main = "Weibull sanity check with log–log plot (0.1 < S < 0.9)")
+abline(lin_fit, col = "blue", lwd = 2)
 
 ```
 
