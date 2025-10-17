@@ -14,9 +14,13 @@ editor_options:
   chunk_output_type: inline
 ---
 
+```{r setup, include=FALSE}
+# Set echo=TRUE to show code in the output for transparency
+knitr::opts_chunk$set(echo = TRUE)
+```
+
 
 ```{r}
-# Load necessary libraries
 library(survival)
 library(dplyr)
 library(lubridate)
@@ -31,70 +35,206 @@ data$Failure.date <- dmy(data$Failure.date)
 # Exclude extreme use cases (>=2400 hours of use)
 data_filtered <- filter(data, Total.usage.time < 2400)
 
+# Dimensions after filtering
 dim(data_filtered)
 
 ```
 
-
-
 ```{r}
-# Define event indicator for battery failure
+# Define event indicator for battery failure (1 if battery failed, 0 if censored)
 data_filtered$Event <- ifelse(data_filtered$Battery.status == "Damage", 1, 0)
-
-# Define lifetime in days:
-# Use Failure.date if present; otherwise use a common censoring date (2020-01-01)
 cutoff_date <- as.Date("2020-01-01")
-data_filtered$End.date <- ifelse(is.na(data_filtered$Failure.date), cutoff_date, data_filtered$Failure.date)
-data_filtered$End.date <- as.Date(data_filtered$End.date, origin = "1970-01-01")
-data_filtered$time_days <- as.numeric(data_filtered$End.date - data_filtered$Registration.date)
 
-# Keep only necessary columns for survival analysis
-surv_data <- data_filtered %>% select(time_days, Event)
-summary(surv_data$time_days)
-table(surv_data$Event)
+# Preprocessing not to lose any useful data
+data_filtered <- data %>%
+  dplyr::filter(Total.usage.time < 2400) %>%
+  dplyr::mutate(
+    # Event = 1 only if Battery.status explicitly says "Damage"; 0 otherwise (including NA)
+    Event     = as.integer(!is.na(Battery.status) & Battery.status == "Damage"),
+    End.date  = dplyr::if_else(!is.na(Failure.date), Failure.date, cutoff_date),
+    time_days = as.numeric(End.date - Registration.date)
+  )
+
+# keep rows with a valid non-negative time
+surv_data <- data_filtered %>% dplyr::filter(!is.na(time_days), time_days >= 0) %>%
+  dplyr::select(time_days, Total.usage.time, Event)
+
+# define usage groups in an ordereded way, so colors and legends are consistent
+data_filtered <- data_filtered %>%
+  dplyr::mutate(
+    usage_rate = Total.usage.time / pmax(time_days, 1),
+    UsageGroup = factor(
+      ifelse(usage_rate >= median(usage_rate, na.rm=TRUE), "High usage", "Low usage"),
+      levels = c("High usage", "Low usage")
+    )
+  )
+
+summary(surv_data$time_days)    # summary of observed times (in days)
+table(surv_data$Event)          # count of censored (0) and Events (1)
 
 ```
 
 
-
 ```{r}
-# Kaplan-Meier survival estimation
+# Kaplan-Meier survival estimation for battery lifetime
 KM_fit <- survfit(Surv(time_days, Event) ~ 1, data = surv_data)
 KM_fit
-summary(KM_fit, times = c(365, 730, 1000))
 
+# Report survival probability estimates at specific time points (1 yr, 2 yr, 1000 days, 3 years)
+summary(KM_fit, times = c(365, 730, 1000, 1095))
+```
+
+```{r plotKM}
+# Plot the Kaplan-Meier survival curve with 95% confidence interval
+plot(KM_fit, conf.int = TRUE, mark.time = FALSE,
+     xlab = "Time since Registration (days)", ylab = "Survival Probability",
+     main = "Kaplan–Meier Estimate of Battery Survival")
+# (The shaded area or dashed lines represent the 95% confidence band for S(t))
 ```
 
 
 
+
 ```{r}
-# Fit a Weibull accelerated failure-time model
+# Fit a Weibull accelerated failure-time model for battery lifetime
 weibull_fit <- survreg(Surv(time_days, Event) ~ 1, data = surv_data, dist = "weibull")
 summary(weibull_fit)
 
 # Extract Weibull parameters (shape and scale) from survreg output
-weibull_shape <- 1/weibull_fit$scale # shape parameter k
-weibull_scale <- exp(coef(weibull_fit))[[1]] # scale parameter λ
-weibull_shape; weibull_scale
+weibull_shape <- 1 / weibull_fit$scale
+weibull_scale <- exp(coef(weibull_fit))
+weibull_shape
+weibull_scale
 
-# Compute L10 from Weibull model
-L10_param <- weibull_scale * (-log(0.9))^(1/weibull_shape)
+# Compute L10 estimated in days (the time by which 10% of batteries have failed) from Weibull model
+L10_param <- weibull_scale * (-log(0.9))^(1 / weibull_shape)
 L10_param
+```
+
+## Sanity check
+
+```{r weibull_sanity_check, fig.height=4, fig.width=6}
+# Complementary log–log (Weibull adequacy) check
+# Under Weibull: log(-log S(t)) = beta * log(t) - beta * log(alpha)
+
+KM_fit <- survfit(Surv(time_days, Event) ~ 1, data = surv_data)
+tt <- KM_fit$time
+St <- KM_fit$surv
+
+# Keep usable points: 0 < S(t) < 1 and t > 0
+ok <- which(tt > 0 & St > 0 & St < 1)
+x  <- log(tt[ok])
+y  <- log(-log(St[ok]))
+
+# Optional: trim very early/late tails for stability (few events / heavy censoring)
+keep <- which(St[ok] > 0.05 & St[ok] < 0.95)
+x <- x[keep]; y <- y[keep]
+
+# Linear fit: y ≈ a + b x  (b ≈ beta, a ≈ -beta*log(alpha))
+lin_fit <- lm(y ~ x)
+beta_cll  <- unname(coef(lin_fit)[2])
+alpha_cll <- exp(-coef(lin_fit)[1] / beta_cll)
+
+# Plot points + KM-based line
+plot(x, y, pch = 16, cex = 0.6,
+     xlab = "log(time)", ylab = "log(-log(S(t)))",
+     main = "Weibull adequacy: complementary log–log plot")
+abline(lin_fit, col = "red", lwd = 2)
+
+# Overlay AFT line from your Weibull fit (blue, dashed)
+# uses your previously computed: weibull_shape = beta, weibull_scale = alpha
+abline(a = -weibull_shape * log(weibull_scale), b = weibull_shape, col = "blue", lwd = 2, lty = 2)
+
+legend("topleft", bty = "n",
+       legend = c(sprintf("KM cll fit:  beta = %.2f,  alpha = %.0f", beta_cll, alpha_cll),
+                  sprintf("AFT line:    beta = %.2f,  alpha = %.0f", weibull_shape, weibull_scale)),
+       col = c("red","blue"), lty = c(1,2), lwd = 2)
+# (Optional) print comparison
+c(beta_cll = beta_cll, beta_aft = weibull_shape,
+  alpha_cll = alpha_cll, alpha_aft = weibull_scale)
+
+```
+
+
+
+
+```{r plotKM no CI}
+
+# Parametric Weibull survival curve on the KM curve for comparison
+plot(KM_fit, conf.int = FALSE, mark.time = FALSE, 
+     xlab = "Time since Registration (days)", ylab = "Survival Probability",
+     main = "Battery Survival: KM vs. Weibull Fit")
+
+t_seq <- seq(0, max(surv_data$time_days), length.out = 200)
+weibull_surv <- exp(- (t_seq / weibull_scale) ^ weibull_shape)  # S(t) Weibull
+
+lines(t_seq, weibull_surv, col = "red", lwd = 2, lty = 2)
+legend("bottomleft", legend = c("Kaplan–Meier (non-parametric)", "Weibull AFT model"), col = c("black", "red"), lty = c(1, 2), lwd = 2, bty = "n")
+
+```
+
+
+```{r}
+# Analyze effect based on the usage intensity
+# Define usage rate [hours/day] for each unit
+surv_data$usage_rate <- surv_data$Total.usage.time / (surv_data$time_days)
+surv_data$usage_rate[!is.finite(surv_data$usage_rate)] <- NA  # handle division by 0 if any time_days=0
+
+# Define "High" vs "Low" usage group based on the median usage rate
+median_rate <- median(surv_data$Total.usage.time / (surv_data$time_days), na.rm = TRUE)
+data_filtered$UsageGroup <- ifelse((surv_data$usage_rate) >= median_rate, "High usage", "Low usage")
+
+# KM curves by usage group
+KM_by_usage <- survfit(Surv(time_days, Event) ~ UsageGroup, data = data_filtered)
+# Plot survival curves for heavy vs light usage
+plot(KM_by_usage, col = c("blue", "red"), xlab = "Time since Registration (days)", 
+     ylab = "Survival Probability", 
+     main = "Battery Survival by Usage Intensity")
+legend("bottomleft", legend = c("High usage", "Low usage"), col = c("blue", "red"), lwd = 3)
 ```
 
 
 
 ```{r}
-
+# Log-rank test for difference in survival between usage groups
+survdiff(Surv(time_days, Event) ~ UsageGroup, data = data_filtered)
+# We obtain a large Chi-square and a tiny p-value, so they indicate a significant difference between the two groups
 ```
 
 
 
+```{r Bootstrap CI}
+# Bootstrap confidence interval for L10 (10% failure time)
+set.seed(123)
+B <- 500   # number of bootstrap replicates
+L10_boot <- numeric(B)
+for(b in 1:B) {
+  # sample subjects with replacement
+  boot_indices <- sample(seq_len(nrow(surv_data)), size = nrow(surv_data), replace = TRUE)
+  boot_sample <- surv_data[boot_indices, ]
+  # fit Weibull AFT model on bootstrap sample
+  boot_fit <- survreg(Surv(time_days, Event) ~ 1, data = boot_sample, dist = "weibull")
+  boot_shape <- 1 / boot_fit$scale
+  boot_scale <- exp(coef(boot_fit))
+  L10_boot[b] <- boot_scale * (-log(0.9))^(1 / boot_shape)
+}
+# Calculate 95% CI from bootstrap distribution
+L10_ci <- quantile(L10_boot, probs = c(0.025, 0.975))
+L10_ci
 
+# Two-sided 95% CI (descriptive)
+L10_ci_95 <- quantile(L10_boot, c(0.025, 0.975))
+L10_ci_95
 
+# One-sided lower 95% bound (for “at least” claims)
+L10_lower_95 <- quantile(L10_boot, 0.05)
+L10_lower_95
 
+# One-sided lower 90% bound
+L10_lower_90 <- quantile(L10_boot, 0.10)
+L10_lower_90
 
-
+```
 
 
 
