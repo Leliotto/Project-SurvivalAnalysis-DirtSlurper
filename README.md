@@ -38,7 +38,7 @@ repo-root/
 after 2400 hours of continuous use. Excluding extreme use cases (i.e., 2400 hours or
 more of continuous use) the manufacturer guarantees L10 ≥ 1000 days. For repair
 purposes, a battery with less than 80% capacity needs to be replaced.).
-- **analysis/Inference_on_ImpactSensor.Rmd": Inference on ImpactSensor (The Impact sensor is built by IButler and an integral part of the design of the Dirt-
+- **analysis/Inference_on_ImpactSensor.Rmd**": Inference on ImpactSensor (The Impact sensor is built by IButler and an integral part of the design of the Dirt-
 Slurper3100. No specifications concerning reliability have been provided to you. However,
 IButler is considering selling this sensor through a satellite company. Help IButler
 in providing lifetime specifications concerning this sensor).
